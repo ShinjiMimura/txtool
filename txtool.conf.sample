@@ -1,0 +1,33 @@
+# put this file (for example; per coin) in:
+#	$HOME/.txtool.BTC
+#	$HOME/.txtool.BCH
+#	$HOME/.txtool.BTG
+#	etc
+#
+# select the config you want to use with 
+# the --conf option, eg: "--conf BTC".
+
+# name of the coin in messages
+COIN=BTC
+
+# a sensible dustlimit
+DUSTLIMIT=0.00001
+
+# RPC client
+RPC=/usr/local/bin/bitcoin-cli
+
+# additional arguments to the standard RPC client, eg: -datadir=/var/btc
+RPC_ARGS=
+
+# path to bitcoin-tx (or equivalent)
+MKTX=/usr/local/bin/bitcoin-tx
+
+# some useful programs
+SEQ=/usr/bin/seq
+JQ=/usr/bin/jq
+BC=/usr/bin/bc
+MKTEMP=/bin/mktemp
+
+
+# setting other variables may result in
+# unspecified behaviour and is not recommended

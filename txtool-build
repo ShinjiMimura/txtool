@@ -1,0 +1,110 @@
+#!/bin/bash
+# Copyright (c) Shinji Mimura 2018, license GPL v3 or any later version
+
+function usage {
+	cat <<END
+Usage: ${PROGNAME} [-Dqh] [--regtest|--testnet] [--conf-base CONFIG_BASE] \\
+	[--conf SUFFIX] [AMOUNT:ADDRESS...] ADDRESS FEE
+
+This program expects a list of UTXO's on stdin as produced by bitcoin-cli
+listunspent. De generated transaction spends all UTXO's to the specified
+addresses. The arguments ADDRESS and FEE are mandatory. All funds not spent to
+the FEE and the ADDRESS:VALUE pairs are spent to ADDRESS.
+
+CONFIG_BASE lists the name of the default config file, for example
+\$HOME/.txtool, SUFFIX can be used to add a suffix to that file, so you can
+have multiple configurations that are easily usable.
+
+The output of this program contains everyting (except the private keys) the
+offline computer needs to produce a signed transaction.
+END
+	exit
+}
+
+# load the functions from the same directory as this script
+. $(dirname $0)/txtool.functions
+
+check_executable_and_add_args RPC bitcoin-cli "$NET $RPC_ARGS"
+
+# read UTXO's from stdin and remove unneeded fields
+debug "reading data from standard input"
+$JQ 'map({txid,vout,scriptPubKey,redeemscript,amount}) | del(.[][] | select(. == null))' > utxos.json
+
+debug "number of positional arguments $#"
+
+# note that the jq(1) add function sometimes cooks up extra decimals,
+# we do not want that, so we calculate the total using bc(1)
+AMOUNT=`$JQ --raw-output 'map(.amount) | @tsv' < utxos.json | tr '\t' '+' | $BC`
+LEFT=$AMOUNT
+
+if [ "$#" -lt "2" ]; then
+	fatal "this program requires at least 2 positional arguments"
+fi
+
+debug "total amount in UTXO's $COIN $AMOUNT"
+
+# create empty transaction
+# 
+# bitcoindiamond-tx leaves the replayprotection field (block hash,
+# between version and vin) empty, asking RPC for createrawtransaction
+# does work
+# TX=`$MKTX --create`
+TX=`$RPC createrawtransaction [] {}`
+
+while [ "$#" -gt "2" ]; do
+	VALUE=`echo $1 | cut -d ':' -f 1`
+	if [ $(echo "$VALUE < $DUSTLIMIT" | $BC) -eq '1' ]; then
+		fatal "output $1 is smaller than dustlimit $COIN $DUSTLIMIT"
+	fi
+	LEFT=`echo "$LEFT - $VALUE" | $BC`
+	debug "add vout $1, amount left is $COIN $LEFT"
+	TX=`$MKTX $TX outaddr=$1`
+	shift
+done 
+
+debug "requested fee is $COIN $2"
+FEE=$2
+
+LEFT=`echo "$LEFT - $FEE" | $BC`
+
+if [ $(echo "$LEFT < 0" | $BC) -eq '1' ]; then
+	fatal "not enough $COIN in inputs to satisfy outputs + fee"
+fi
+
+if [ $(echo "$LEFT < $DUSTLIMIT" | $BC) -eq '1' ]; then
+	fatal "last output $1 is smaller than dustlimit $COIN $DUSTLIMIT"
+fi
+
+debug "add vout $LEFT:$1"
+TX=`$MKTX $TX outaddr=$LEFT:$1`
+
+DEPENDENTS=`$JQ 'map(.txid) | unique' < utxos.json`
+
+JSON_DEPS='{}'
+COUNT=`echo $DEPENDENTS | $JQ 'length'`
+
+debug "specified UTXO's depend on $COUNT transaction(s)"
+
+for i in $($SEQ 0 $(($COUNT-1))); do
+	DEPTXID=`echo $DEPENDENTS | $JQ --raw-output ".[$i]"`
+	DEPTX=`$RPC getrawtransaction $DEPTXID`
+	JSON_DEPS=`echo $JSON_DEPS | $JQ --arg tx $DEPTX --arg txid $DEPTXID '.[$txid]=$tx'`
+done
+
+COUNT=`$JQ 'length' < utxos.json`
+
+debug "there are $COUNT UTXO's in the input"
+
+for i in $($SEQ 0 $(($COUNT-1))); do
+	UTXO=`$JQ --argjson i $i --raw-output '.[$i] | .txid + ":" + (.vout | tostring)' < utxos.json`
+	TX=`$MKTX $TX in=$UTXO`
+done
+
+UTXOS=`cat utxos.json`
+
+# build output object
+$JQ -n --arg tx $TX \
+	--argjson deps "$JSON_DEPS" \
+	--argjson prevtxs "$UTXOS" \
+	--argjson fee "$FEE" \
+	'.hex = $tx | .deps = $deps | .prevtxs = $prevtxs | .fee = $fee'

@@ -1,0 +1,110 @@
+#!/bin/bash
+# Copyright (c) Shinji Mimura 2018, license GPL v3 or any later version
+
+function usage {
+	cat <<END
+Usage: ${PROGNAME} [-Dqh] [--regtest|--testnet] [--conf-base CONFIG_BASE] \\
+		[--conf SUFFIX] PRIVKEYFILE
+
+This program accepts the output of txtool-build(1) on stdin and a textfile
+containing private keys in wallet import format (one per line) as first
+and only positional argument.
+
+CONFIG_BASE lists the name of the default config file, for example
+\$HOME/.txtool, SUFFIX can be used to add a suffix to that file, so you can
+have multiple configurations that are easily usable.
+
+The output will be a signed transaction on stdout.
+END
+	exit
+}
+
+# load the functions from the same directory as this script
+. $(dirname $0)/txtool.functions
+
+if [ "$#" != "1" ]; then
+	fatal "one positional argument required; the file with the private keys"
+fi
+
+mkfifo $TMPDIR/privkeys.fifo
+
+#read privkeys from stdin and stuff the keys in a FIFO, so that
+# they do not appear on the commandline of $MKTX
+$JQ -R -s -c 'rtrimstr("\n") | split("\n")' < $1 > $TMPDIR/privkeys.fifo &
+
+#switch to TMPDIR
+cd $TMPDIR
+
+# read input from stdin
+debug "reading data from standard input"
+cat > input.json
+
+$JQ '.prevtxs' < input.json > prevtxs.json
+
+for i in $($JQ --raw-output '.deps | keys | @tsv' < input.json); do
+	DEPTX=`$JQ --arg txid $i --raw-output '.deps | .[$txid]' < input.json`
+	if [ "$i" != `$MKTX -txid $DEPTX` ]; then
+		fatal "txid does not match raw transaction data"
+	fi
+done
+
+COUNT=`$JQ '.prevtxs| length' < input.json`
+debug "there are $COUNT input.jsons in the transaction"
+
+$JQ --raw-output '.hex' < input.json > hex
+UNSIGNED=$($MKTX -json `cat hex`)
+
+AMOUNT=0
+
+for i in $($SEQ 0 $(($COUNT-1))); do
+	TXO=`$JQ --argjson i $i '.prevtxs[$i]' < input.json`
+	INDEX=`echo $TXO | $JQ --raw-output '.txid'`
+	VOUT=`echo $TXO | $JQ --raw-output '.vout'`
+	debug "check txin$i match? $INDEX:$VOUT"
+	TXRAW=`$JQ --raw-output --arg i $INDEX  '.deps[$i]' < input.json`
+	OUTPUT=`$MKTX -json "$TXRAW" | $JQ --argjson i $VOUT '.vout[$i]'`
+	AMOUNT_IN_DEP=`echo $OUTPUT | $JQ '.value'`
+	AMOUNT_ASSUMED=`echo $TXO | $JQ '.amount'`
+	if [ "$AMOUNT_IN_DEP" != "$AMOUNT_ASSUMED" ]; then
+		fatal "assumed amount in txin $i ($INDEX:$VOUT) is wrong $AMOUNT_IN_DEP != $AMOUNT_ASSUMED"
+	fi
+	AMOUNT=$(echo "$AMOUNT + $AMOUNT_IN_DEP" | $BC)
+	SCRIPTPUBKEY_IN_DEP=`echo $OUTPUT | $JQ --raw-output '.scriptPubKey | .hex'`
+	SCRIPTPUBKEY_ASSUMED=`echo $TXO | $JQ --raw-output '.scriptPubKey'`
+	if [ "$SCRIPTPUBKEY_IN_DEP" != "$SCRIPTPUBKEY_ASSUMED" ]; then
+		fatal "assumed scriptPubKey in txin $i ($INDEX:$VOUT) is wrong $SCRIPTPUBKEY_IN_DEP != $SCRIPTPUBKEY_ASSUMED"
+	fi
+done
+
+debug "total amount in input.jsons $COIN $AMOUNT"
+
+# check outputs
+
+COUNT=`echo $UNSIGNED | $JQ '.vout| length'`
+
+for i in $($SEQ 0 $(($COUNT-1))); do
+	VOUT=`echo $UNSIGNED | $JQ --argjson i $i '.vout[$i]'`
+	VALUE=`echo $VOUT | $JQ --raw-output '.value'`
+	if [ "$(echo "$VALUE < $DUSTLIMIT" | $BC)" = "1" ]; then
+		fatal "output smaller than dustlimit $DUSTLIMIT"
+	fi
+	AMOUNT=$(echo "$AMOUNT - $VALUE" | $BC)
+	TYPE=`echo $VOUT | $JQ --raw-output '.scriptPubKey | .type'`
+	case $TYPE in
+		pubkeyhash)
+			ADDRESS=`echo $VOUT | $JQ --raw-output '.scriptPubKey | .addresses[0]'`
+			warning "Sending $COIN $VALUE to $ADDRESS (using P2PKH)"
+			;;
+		scripthash)
+			ADDRESS=`echo $VOUT | $JQ --raw-output '.scriptPubKey | .addresses[0]'`
+			warning "Sending $COIN $VALUE to $ADDRESS (using P2SH)"
+			;;
+		*)
+			fatal "unknown output type $TYPE"
+			;;
+	esac
+done
+
+warning "transaction fee is $COIN $AMOUNT"
+
+$MKTX $(<hex) "load=privatekeys:privkeys.fifo" "load=prevtxs:prevtxs.json" sign=ALL

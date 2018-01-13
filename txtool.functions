@@ -1,0 +1,134 @@
+#!/bin/bash
+# Copyright (c) Shinji Mimura 2018, license GPL v3 or any later version
+
+PROGNAME=`basename $0` || exit 1
+QUIET=0
+DEBUG=0
+DUSTLIMIT=0.00001
+RPC_ARGS=
+RPC=/usr/local/bin/bitcoin-cli
+MKTX=/usr/local/bin/bitcoin-tx
+SEQ=/usr/bin/seq
+JQ=/usr/bin/jq
+BC=/usr/bin/bc
+MKTEMP=/bin/mktemp
+CONF_BASE=$HOME/.txtool
+COIN=BTC
+NET=''
+SUFFIX=
+
+function debug {
+	if [ "$DEBUG" = "1" ]; then echo "${PROGNAME}:debug:$1" 1>&2; fi
+}
+
+function warning {
+	if [ "$QUIET" = "0" ]; then echo "${PROGNAME}:warning:$1" 1>&2; fi
+}
+
+export TMPDIR=
+
+function cleanup {
+	debug "cleanup called, arg=$1"
+	trap - EXIT HUP INT TERM ERR
+	if [ "$TMPDIR" != "" -a -d "$TMPDIR" ]; then
+		debug "removing $TMPDIR"
+		rm -f -r $TMPDIR
+	fi
+	exit $1
+}
+
+function fatal {
+	echo "${PROGNAME}:${1:-"unknown error"}" 1>&2
+	cleanup 1
+}
+
+function sig_handler_HUPINTTERM {
+	fatal "cought HUP, INT or TERM signal, exiting"
+}
+
+function sig_handler_ERR {
+	cleanup 1
+}
+
+function sig_handler_EXIT {
+	cleanup 0
+}
+
+trap sig_handler_HUPINTTERM HUP INT TERM
+trap sig_handler_ERR ERR 
+trap sig_handler_EXIT EXIT
+
+# first argument is full path
+# second argument is canonical name of program
+# third argument is extra options
+function check_executable_and_add_args {
+	TMP=$(eval "echo \$$1")
+	if [ ! -x "$TMP" ]; then
+		fatal "$2(1) or equivalent not found or executable"
+		exit
+	fi
+	debug "using '$2': $TMP $3"
+	eval "$1=\"$TMP $3\""
+}
+
+while [ "$1" != "" ]; do
+	case $1 in
+		-D | --debug )
+			shift
+			DEBUG=1
+			;;
+		--regtest )
+			shift
+			NET='-regtest'
+			;;
+		--conf-base )
+			shift
+			CONF_BASE=$1
+			shift
+			;;
+		--conf )
+			shift
+			SUFFIX=$1
+			shift
+			;;
+		--testnet )
+			shift
+			NET='-testnet'
+			;;
+		-q | --quiet )
+			shift
+			QUIET=1
+			;;
+		-h | --help )
+			shift
+			usage
+			;;
+		* )
+			break;
+			;;
+	esac
+done
+
+if [ "$SUFFIX" != "" ]; then
+	if [ ! -r $CONF_BASE.$SUFFIX ]; then
+		fatal "unable to read $CONF_BASE.$SUFFIX"
+	fi
+	debug "loading config $CONF_BASE.$SUFFIX"
+	. $CONF_BASE.$SUFFIX
+else	 
+	if [ -r $CONF_BASE ]; then
+		debug "loading config $CONF_BASE"
+		. $CONF_BASE
+	else
+		debug "no configfile at $CONF_BASE"
+	fi
+fi
+
+check_executable_and_add_args MKTX bitcoin-tx $NET
+check_executable_and_add_args JQ jq
+check_executable_and_add_args BC bc -l
+check_executable_and_add_args MKTEMP mktemp
+check_executable_and_add_args SEQ seq
+
+TMPDIR=`$MKTEMP -d -p /tmp .$PROGNAME.XXXXXX`
+debug "temporary directory is $TMPDIR"
