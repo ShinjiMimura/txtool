@@ -8,7 +8,7 @@ The script `txtool-build` lets you build a transaction, while bundling it with
 all the info an offline PC needs to verify that it is correct and to sign it
 (except the private keys).
 
-Then `txtool-sign` can sign this transactin using only the data provided by
+Then `txtool-sign` can sign this transaction using only the data provided by
 `txtool-build` and a text file containing one private key per line.
 
 These scripts use `bitcoin-cli` (or variants) to fetch information about
