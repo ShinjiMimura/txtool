@@ -12,17 +12,27 @@ Then `txtool-sign` can sign this transactin using only the data provided by
 `txtool-build` and a text file containing one private key per line.
 
 These scripts use `bitcoin-cli` (or variants) to fetch information about
-transactions the created transaction depends on and `bitcoin-tx` (or variants)
-to build and sign the transaction.
+transactions the created transaction depends on and get an initial (empty)
+transaction. Then `bitcoin-tx` (or variants) is used to populate and sign the
+transaction.
 
 Since most bitcoin forks include these programs, these scripts can be used to
 create transactions to split your coins without relying on centralized
 services.
 
+Testing
+-------
+
+The script 'txtool-test' runs a bitcoin daemon in a temporary directory,
+performs the complete workflow and finally checks if the generated transaction
+is accepted by the daemon. If all goes well (and the debug flag '-D' is not
+specified), no output is generated.
+
 Installation
 ------------
 
-Move `txtool-buid`, `txtool-sign` and `txtool.functions` to somewhere in the `PATH`, for example `/usr/local/bin/`.
+Move `txtool-buid`, `txtool-sign` and `txtool.functions` to somewhere in the
+`PATH`, for example `/usr/local/bin/`.
 
 Simple guide to splitting BCD
 -----------------------------
@@ -44,7 +54,7 @@ be added).
 - let the blockchain sync
 
 - create `~/.txtool.BCD` in which you point to `bitcoindiamond-tx` and
-`bitcoindiamond-cli` and set `RPC_ARGS=` to `-datadir=...` if you do not use
+`bitcoindiamond-cli` and set `CORE_ARGS=` to `-datadir=...` if you do not use
 the default datadir.
 
 - get an address to which you want to move your BCD and do

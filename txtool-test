@@ -1,0 +1,127 @@
+#!/bin/bash
+# Copyright (c) Shinji Mimura 2018, license GPL v3 or any later version
+
+function usage {
+	cat <<END
+Usage: ${PROGNAME} [-Dqh] [--conf-base CONFIG_BASE] [--conf SUFFIX]
+
+This program tests the workings of txtool-build(1) and txtool-sign(1)
+using node software specified by the selected config file. The value of
+RPC_ARGS will be overrided to point to a local (testing) and NET will
+be '-regtest'.
+
+Use -D to see what it is doing.
+END
+	exit
+}
+
+cd $(dirname $0)
+
+# load the functions from the same directory as this script
+. txtool.functions
+
+SCRIPTPATH=`pwd`
+
+debug "SCRIPTPATH=$SCRIPTPATH"
+
+cd $TMPDIR
+
+debug 'setting NET=-regtest'
+NET='-regtest'
+
+debug 'setting RPC_ARGS=-datadir=$TMPDIR/daemon'
+mkdir $TMPDIR/daemon
+
+CORE_ARGS=-datadir=$TMPDIR/daemon
+check_executable_and_add_args RPC bitcoin-cli "$NET $CORE_ARGS"
+check_executable_and_add_args DAEMON bitcoind "$NET $CORE_ARGS"
+
+debug "starting daemon in $TMPDIR/daemon"
+$DAEMON &
+
+debug "waiting for daemon to start"
+
+while [ ! -d $TMPDIR/daemon/regtest -o ! -f $TMPDIR/daemon/regtest/bitcoind.pid ]; do
+	sleep 1;
+done
+
+debug "deamon running with PID $(<$TMPDIR/daemon/regtest/bitcoind.pid)"
+
+# shut the daemon down if this script ends
+ADDITIONAL_CLEANUP="kill $(<$TMPDIR/daemon/regtest/bitcoind.pid)"
+
+debug "waiting for RPC interface to come up"
+
+sleep 4
+
+debug "mining 432 blocks to enable segwit"
+
+$RPC generate 432 > /dev/null
+
+debug "getting some UTXO's to spend from"
+$RPC listunspent | $JQ '[.[0,1]]' > utxo.json
+
+$JQ --raw-output 'map(.address) | @tsv' < utxo.json | tr '\t' '\n' | sort | uniq > spendaddr.txt
+debug "spending from $(tr '\n' ' ' < spendaddr.txt)"
+
+debug "acquiring corresponding private key(s)"
+for i in $(< spendaddr.txt); do
+	$RPC dumpprivkey $i >> private.txt
+done
+
+debug "private key(s): $(tr '\n' ' ' < private.txt)"
+
+debug "get destination and change address"
+DEST=`$RPC getnewaddress`
+CHANGE=`$RPC getnewaddress`
+debug "destination $DEST"
+debug "change $CHANGE"
+
+debug "building configfile for txtool-build and txtool-sign"
+if [ "$SUFFIX" = "" ]; then
+	if [ -f "$CONF_BASE" ]; then
+		cp $CONF_BASE txtool.conf
+	fi
+else
+	if [ -f "$CONF_BASE.$SUFFIX" ]; then
+		cp $CONF_BASE.$SUFFIX txtool.conf
+	fi
+fi
+
+# maybe 'overwrite' parts of the configuration
+echo "CORE_ARGS=-datadir=$TMPDIR/daemon" >> txtool.conf
+
+debug "configfile $TMPDIR/txtool.conf (warning NET should not appear here):"
+CONFFILE=`cat txtool.conf`
+debug "$CONFFILE"
+
+ARGS="--conf-base $TMPDIR/txtool.conf --regtest"
+if [ "$DEBUG" = "1" ]; then
+	ARGS="$ARGS -D"
+else
+	ARGS="$ARGS -q"
+fi
+
+BUILD="$SCRIPTPATH/txtool-build $ARGS"
+SIGN="$SCRIPTPATH/txtool-sign $ARGS"
+debug "build: $BUILD"
+debug "sign: $SIGN"
+
+debug "building transaction: $COIN 20 to $DEST, change to $CHANGE and fee 0.0001"
+$BUILD 20:$DEST $CHANGE 0.0001 < utxo.json > unsigned.tx
+debug "data for txtool-sign: $(<unsigned.tx)"
+$SIGN private.txt > signed.tx < unsigned.tx
+
+debug "signed tx: $(<signed.tx)"
+
+$MKTX -txid $(<signed.tx) > txid
+
+debug "txid: $(<txid)"
+
+$RPC sendrawtransaction $(<signed.tx) > response.txt
+
+if [ "$(<response.txt)" = "$(<txid)" ]; then
+	debug "transaction accepted by daemon"
+else
+	fatal "test failed: $(<response)"
+fi

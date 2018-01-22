@@ -7,7 +7,7 @@ Usage: ${PROGNAME} [-Dqh] [--regtest|--testnet] [--conf-base CONFIG_BASE] \\
 	[--conf SUFFIX] [AMOUNT:ADDRESS...] ADDRESS FEE
 
 This program expects a list of UTXO's on stdin as produced by bitcoin-cli
-listunspent. De generated transaction spends all UTXO's to the specified
+listunspent. The generated transaction spends all UTXO's to the specified
 addresses. The arguments ADDRESS and FEE are mandatory. All funds not spent to
 the FEE and the ADDRESS:VALUE pairs are spent to ADDRESS.
 
@@ -16,7 +16,8 @@ CONFIG_BASE lists the name of the default config file, for example
 have multiple configurations that are easily usable.
 
 The output of this program contains everyting (except the private keys) the
-offline computer needs to produce a signed transaction.
+offline computer needs to check that the input values in the txins are correct
+and to produce a signed transaction.
 END
 	exit
 }
@@ -24,7 +25,7 @@ END
 # load the functions from the same directory as this script
 . $(dirname $0)/txtool.functions
 
-check_executable_and_add_args RPC bitcoin-cli "$NET $RPC_ARGS"
+check_executable_and_add_args RPC bitcoin-cli "$NET $CORE_ARGS"
 
 # read UTXO's from stdin and remove unneeded fields
 debug "reading data from standard input"

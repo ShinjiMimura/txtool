@@ -16,8 +16,11 @@ DUSTLIMIT=0.00001
 # RPC client
 RPC=/usr/local/bin/bitcoin-cli
 
+# DAEMON (currently only used for txtool-test)
+DAEMON=/usr/local/bin/bitcoind
+
 # additional arguments to the standard RPC client, eg: -datadir=/var/btc
-RPC_ARGS=
+CORE_ARGS=
 
 # path to bitcoin-tx (or equivalent)
 MKTX=/usr/local/bin/bitcoin-tx

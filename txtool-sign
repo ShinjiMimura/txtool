@@ -14,7 +14,7 @@ CONFIG_BASE lists the name of the default config file, for example
 \$HOME/.txtool, SUFFIX can be used to add a suffix to that file, so you can
 have multiple configurations that are easily usable.
 
-The output will be a signed transaction on stdout.
+The result will be a signed transaction on stdout.
 END
 	exit
 }
@@ -49,7 +49,7 @@ for i in $($JQ --raw-output '.deps | keys | @tsv' < input.json); do
 done
 
 COUNT=`$JQ '.prevtxs| length' < input.json`
-debug "there are $COUNT input.jsons in the transaction"
+debug "there are $COUNT txins in the transaction"
 
 $JQ --raw-output '.hex' < input.json > hex
 UNSIGNED=$($MKTX -json `cat hex`)
