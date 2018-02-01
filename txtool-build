@@ -27,6 +27,8 @@ END
 
 check_executable_and_add_args RPC bitcoin-cli "$NET $CORE_ARGS"
 
+cd $TMPDIR
+
 # read UTXO's from stdin and remove unneeded fields
 debug "reading data from standard input"
 $JQ 'map({txid,vout,scriptPubKey,redeemscript,amount}) | del(.[][] | select(. == null))' > utxos.json
@@ -101,11 +103,11 @@ for i in $($SEQ 0 $(($COUNT-1))); do
 	TX=`$MKTX $TX in=$UTXO`
 done
 
-UTXOS=`cat utxos.json`
+echo $JSON_DEPS > deps.json
 
 # build output object
 $JQ -n --arg tx $TX \
-	--argjson deps "$JSON_DEPS" \
-	--argjson prevtxs "$UTXOS" \
+	--argfile deps deps.json \
+	--argfile prevtxs utxos.json \
 	--argjson fee "$FEE" \
 	'.hex = $tx | .deps = $deps | .prevtxs = $prevtxs | .fee = $fee'
