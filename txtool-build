@@ -31,7 +31,7 @@ cd $TMPDIR
 
 # read UTXO's from stdin and remove unneeded fields
 debug "reading data from standard input"
-$JQ 'map({txid,vout,scriptPubKey,redeemscript,amount}) | del(.[][] | select(. == null))' > utxos.json
+$JQ 'map({txid,vout,scriptPubKey,redeemScript,amount}) | del(.[][] | select(. == null))' > utxos.json
 
 debug "number of positional arguments $#"
 
